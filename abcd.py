@@ -210,22 +210,22 @@ class ThreeModeScheduler:
         logger.info(f"Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
         return successful
     
-    async def process_due_posts(self, bot):
-    with self.get_db() as conn:
-        c = conn.cursor()
-        # Get current time in IST and convert to the format stored in DB
-        now = datetime.now(IST).astimezone(pytz.UTC).replace(tzinfo=None).isoformat()
-        c.execute('''
-            SELECT * FROM posts 
-            WHERE scheduled_time <= ? AND posted = 0
-            ORDER BY scheduled_time
-            LIMIT 20
-        ''', (now,))
-        posts = c.fetchall()
-    
-    for post in posts:
-        await self.send_to_all_channels(bot, post)
-        await asyncio.sleep(2)
+   async def process_due_posts(self, bot):
+        with self.get_db() as conn:
+            c = conn.cursor()
+            # Get current time in IST and convert to the format stored in DB
+            now = datetime.now(IST).astimezone(pytz.UTC).replace(tzinfo=None).isoformat()
+            c.execute('''
+                SELECT * FROM posts 
+                WHERE scheduled_time <= ? AND posted = 0
+                ORDER BY scheduled_time
+                LIMIT 20
+            ''', (now,))
+            posts = c.fetchall()
+        
+        for post in posts:
+            await self.send_to_all_channels(bot, post)
+            await asyncio.sleep(2)
     
     def cleanup_posted_content(self):
         """Auto-cleanup: Remove old posted content and reclaim space"""
