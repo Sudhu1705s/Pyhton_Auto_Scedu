@@ -1228,6 +1228,7 @@ def main():
     scheduler = ThreeModeScheduler(
         BOT_TOKEN, 
         ADMIN_ID,
+        db_path='/data/posts.db', 
         auto_cleanup_minutes=30
     )
     
