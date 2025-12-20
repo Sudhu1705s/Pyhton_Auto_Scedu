@@ -1013,6 +1013,36 @@ async def schedule_bulk_posts(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     scheduler.user_sessions[user_id] = {'mode': None, 'step': 'choose_mode'}
 
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reset/delete all pending posts"""
+    if update.effective_user.id != scheduler.admin_id:
+        return
+    
+    if not context.args or context.args[0].lower() != 'confirm':
+        await update.message.reply_text(
+            "⚠️ <b>WARNING: This will delete ALL pending posts!</b>\n\n"
+            "To confirm, use:\n"
+            "<code>/reset confirm</code>",
+            reply_markup=get_mode_keyboard(),
+            parse_mode='HTML'
+        )
+        return
+    
+    with scheduler.get_db() as conn:
+        c = conn.cursor()
+        c.execute('SELECT COUNT(*) FROM posts WHERE posted = 0')
+        count = c.fetchone()[0]
+        
+        c.execute('DELETE FROM posts WHERE posted = 0')
+        conn.commit()
+    
+    await update.message.reply_text(
+        f"✅ <b>Reset Complete!</b>\n\n"
+        f"🗑️ Deleted {count} pending posts\n\n"
+        f"You can now schedule new posts with correct IST timezone.",
+        reply_markup=get_mode_keyboard(),
+        parse_mode='HTML'
+    )
 
 async def list_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != scheduler.admin_id:
@@ -1104,9 +1134,8 @@ def parse_duration_to_minutes(text):
     text = text.strip().lower()
     
     if text == 'today':
-        now = datetime.now(IST)
+        now = datetime.now()
         midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
-        midnight = IST.localize(midnight)
         return int((midnight - now).total_seconds() / 60)
     
     if text[-1] == 'm':
@@ -1243,6 +1272,7 @@ def main():
     app.add_handler(CommandHandler("removechannel", remove_channel_command))
     app.add_handler(CommandHandler("delete", delete_post))
     app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(CommandHandler("reset", reset_command))
     
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     
