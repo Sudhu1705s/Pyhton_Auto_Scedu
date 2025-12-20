@@ -9,6 +9,10 @@ from contextlib import contextmanager
 import sys
 import re
 import os
+import pytz
+
+# Add this near the top, after other imports
+IST = pytz.timezone('Asia/Kolkata')  # Your timezone
 
 # Fix Windows encoding
 if sys.platform == 'win32':
@@ -207,20 +211,21 @@ class ThreeModeScheduler:
         return successful
     
     async def process_due_posts(self, bot):
-        with self.get_db() as conn:
-            c = conn.cursor()
-            now = datetime.now().isoformat()
-            c.execute('''
-                SELECT * FROM posts 
-                WHERE scheduled_time <= ? AND posted = 0
-                ORDER BY scheduled_time
-                LIMIT 20
-            ''', (now,))
-            posts = c.fetchall()
-        
-        for post in posts:
-            await self.send_to_all_channels(bot, post)
-            await asyncio.sleep(2)
+    with self.get_db() as conn:
+        c = conn.cursor()
+        # Get current time in IST and convert to the format stored in DB
+        now = datetime.now(IST).astimezone(pytz.UTC).replace(tzinfo=None).isoformat()
+        c.execute('''
+            SELECT * FROM posts 
+            WHERE scheduled_time <= ? AND posted = 0
+            ORDER BY scheduled_time
+            LIMIT 20
+        ''', (now,))
+        posts = c.fetchall()
+    
+    for post in posts:
+        await self.send_to_all_channels(bot, post)
+        await asyncio.sleep(2)
     
     def cleanup_posted_content(self):
         """Auto-cleanup: Remove old posted content and reclaim space"""
@@ -1100,8 +1105,9 @@ def parse_duration_to_minutes(text):
     text = text.strip().lower()
     
     if text == 'today':
-        now = datetime.now()
+        now = datetime.now(IST)
         midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
+        midnight = IST.localize(midnight)
         return int((midnight - now).total_seconds() / 60)
     
     if text[-1] == 'm':
@@ -1117,12 +1123,15 @@ def parse_duration_to_minutes(text):
 def parse_duration_time(text):
     text = text.strip().lower()
     
+    # Get current time in IST
+    now = datetime.now(IST)
+    
     if text[-1] == 'm':
-        return datetime.now() + timedelta(minutes=int(text[:-1]))
+        return now + timedelta(minutes=int(text[:-1]))
     elif text[-1] == 'h':
-        return datetime.now() + timedelta(hours=int(text[:-1]))
+        return now + timedelta(hours=int(text[:-1]))
     elif text[-1] == 'd':
-        return datetime.now() + timedelta(days=int(text[:-1]))
+        return now + timedelta(days=int(text[:-1]))
     
     raise ValueError("Invalid format")
 
@@ -1130,29 +1139,35 @@ def parse_duration_time(text):
 def parse_exact_time(text):
     text = text.strip().lower()
     
+    # Get current time in IST
+    now = datetime.now(IST)
+    
     if text.startswith('tomorrow'):
-        tomorrow = datetime.now() + timedelta(days=1)
+        tomorrow = now + timedelta(days=1)
         time_part = text.replace('tomorrow', '').strip()
         if time_part:
             hour = parse_hour(time_part)
-            return datetime.combine(tomorrow.date(), datetime.min.time()) + timedelta(hours=hour)
+            result = datetime.combine(tomorrow.date(), datetime.min.time()) + timedelta(hours=hour)
+            return IST.localize(result)
         return tomorrow
     
     if text.startswith('today'):
-        today = datetime.now()
         time_part = text.replace('today', '').strip()
         if time_part:
             hour = parse_hour(time_part)
-            return datetime.combine(today.date(), datetime.min.time()) + timedelta(hours=hour)
+            result = datetime.combine(now.date(), datetime.min.time()) + timedelta(hours=hour)
+            return IST.localize(result)
     
     try:
-        return datetime.strptime(text, '%Y-%m-%d %H:%M')
+        result = datetime.strptime(text, '%Y-%m-%d %H:%M')
+        return IST.localize(result)
     except:
         pass
     
     try:
         dt = datetime.strptime(text, '%m/%d %H:%M')
-        return dt.replace(year=datetime.now().year)
+        result = dt.replace(year=now.year)
+        return IST.localize(result)
     except:
         pass
     
