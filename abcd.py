@@ -292,10 +292,9 @@ scheduler = None
 
 
 def get_mode_keyboard():
-    """Main menu with 4 options"""
+    """Main menu with 3 options"""
     keyboard = [
         [KeyboardButton("📦 Bulk Posts (Auto-Space)")],
-        [KeyboardButton("🎯 Bulk Posts (Batches)")],
         [KeyboardButton("📅 Exact Time/Date")],
         [KeyboardButton("⏱️ Duration (Wait Time)")],
         [KeyboardButton("📋 View Pending"), KeyboardButton("📊 Stats")],
@@ -341,14 +340,6 @@ def get_quick_time_keyboard():
 def get_exact_time_keyboard():
     keyboard = [
         [KeyboardButton("today 18:00"), KeyboardButton("tomorrow 9am")],
-        [KeyboardButton("❌ Cancel")]
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
-
-def get_batch_size_keyboard():
-    keyboard = [
-        [KeyboardButton("10"), KeyboardButton("20"), KeyboardButton("30")],
-        [KeyboardButton("50"), KeyboardButton("100")],
         [KeyboardButton("❌ Cancel")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
@@ -561,36 +552,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='HTML'
             )
             return
-
-        elif "🎯 Bulk" in message_text and "Batches" in message_text:
-            if len(scheduler.channel_ids) == 0:
-                await update.message.reply_text(
-                    "❌ <b>No channels configured!</b>\n\n"
-                    "Please add at least one channel first:\n"
-                    "<code>/addchannel -1001234567890</code>",
-                    reply_markup=get_mode_keyboard(),
-                    parse_mode='HTML'
-                )
-                return
-            
-            session['mode'] = 'batch'
-            session['step'] = 'batch_get_start_time'
-            session['posts'] = []
-            
-            await update.message.reply_text(
-                "🎯 <b>BATCH MODE ACTIVATED</b>\n\n"
-                "📅 <b>Step 1:</b> When should the FIRST batch go out?\n\n"
-                "Select a time or type your own:\n\n"
-                "<b>Type format examples:</b>\n"
-                "• <code>now</code> - Start immediately\n"
-                "• <code>30m</code> - Start in 30 minutes\n"
-                "• <code>2h</code> - Start in 2 hours\n"
-                "• <code>today 18:00</code> - Start today at 6 PM\n"
-                "• <code>tomorrow 9am</code> - Start tomorrow at 9 AM",
-                reply_markup=get_exact_time_keyboard(),
-                parse_mode='HTML'
-            )
-            return
         
         elif "📅 Exact" in message_text or "exact" in message_text.lower():
             if len(scheduler.channel_ids) == 0:
@@ -787,176 +748,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif session['step'] == 'bulk_confirm':
             if "✅ Confirm" in message_text or "confirm" in message_text.lower():
                 await schedule_bulk_posts(update, context)
-                return
-            elif "❌" in message_text or "cancel" in message_text.lower():
-                await cancel(update, context)
-                return
-            else:
-                await update.message.reply_text(
-                    "⚠️ Please click <b>✅ Confirm & Schedule</b> to proceed or <b>❌ Cancel</b> to abort",
-                    reply_markup=get_confirmation_keyboard(),
-                    parse_mode='HTML'
-                )
-                return
-
-    # ============ MODE 4: BATCH POSTS ============
-    elif session['mode'] == 'batch':
-        
-        if "❌" in message_text or "cancel" in message_text.lower():
-            await cancel(update, context)
-            return
-        
-        if session['step'] == 'batch_get_start_time':
-            try:
-                if message_text.strip().lower() == 'now':
-                    start_time = datetime.now(IST)
-                else:
-                    try:
-                        start_time = parse_duration_time(message_text)
-                    except:
-                        start_time = parse_exact_time(message_text)
-                
-                session['batch_start_time'] = start_time
-                session['step'] = 'batch_get_duration'
-                
-                await update.message.reply_text(
-                    f"✅ Start time set: <b>{start_time.strftime('%Y-%m-%d %H:%M:%S')}</b>\n\n"
-                    f"⏱️ <b>Step 2:</b> How long to distribute ALL batches?\n\n"
-                    "Select a duration or type your own:\n"
-                    "• <code>2h</code> - Over 2 hours\n"
-                    "• <code>6h</code> - Over 6 hours\n"
-                    "• <code>8h</code> - Over 8 hours\n"
-                    "• <code>12h</code> - Over 12 hours\n"
-                    "• <code>1d</code> - Over 24 hours",
-                    reply_markup=get_duration_keyboard(),
-                    parse_mode='HTML'
-                )
-                
-            except ValueError as e:
-                await update.message.reply_text(
-                    f"❌ Invalid time format!\n\n{str(e)}",
-                    reply_markup=get_exact_time_keyboard()
-                )
-            return
-        
-        elif session['step'] == 'batch_get_duration':
-            try:
-                duration_minutes = parse_duration_to_minutes(message_text)
-                session['duration_minutes'] = duration_minutes
-                session['step'] = 'batch_get_batch_size'
-                
-                await update.message.reply_text(
-                    f"✅ Duration set: <b>{duration_minutes} minutes</b>\n\n"
-                    f"📦 <b>Step 3:</b> How many posts per batch?\n\n"
-                    "Select a batch size or type your own:\n"
-                    "• <code>10</code> - 10 posts at once\n"
-                    "• <code>20</code> - 20 posts at once\n"
-                    "• <code>30</code> - 30 posts at once\n"
-                    "• <code>50</code> - 50 posts at once",
-                    reply_markup=get_batch_size_keyboard(),
-                    parse_mode='HTML'
-                )
-                
-            except ValueError:
-                await update.message.reply_text(
-                    "❌ Invalid duration!\n\n"
-                    "Use: 2h, 6h, 8h, 12h, 1d",
-                    reply_markup=get_duration_keyboard()
-                )
-            return
-        
-        elif session['step'] == 'batch_get_batch_size':
-            try:
-                batch_size = int(message_text.strip())
-                if batch_size < 1:
-                    raise ValueError("Batch size must be at least 1")
-                
-                session['batch_size'] = batch_size
-                session['step'] = 'batch_collect_posts'
-                
-                await update.message.reply_text(
-                    f"✅ Batch size set: <b>{batch_size} posts per batch</b>\n\n"
-                    f"📤 <b>Step 4:</b> Now send/forward me all the posts you want to schedule\n\n"
-                    f"When you're done, click the button below:",
-                    reply_markup=get_bulk_collection_keyboard(),
-                    parse_mode='HTML'
-                )
-                
-            except ValueError:
-                await update.message.reply_text(
-                    "❌ Invalid batch size!\n\n"
-                    "Please enter a number (e.g., 10, 20, 30)",
-                    reply_markup=get_batch_size_keyboard()
-                )
-            return
-        
-        elif session['step'] == 'batch_collect_posts':
-            
-            if "✅ Done" in message_text or "done" in message_text.lower():
-                posts = session.get('posts', [])
-                
-                if not posts:
-                    await update.message.reply_text(
-                        "❌ No posts collected! Please send at least one post.",
-                        reply_markup=get_bulk_collection_keyboard()
-                    )
-                    return
-                
-                session['step'] = 'batch_confirm'
-                
-                duration_minutes = session['duration_minutes']
-                batch_size = session['batch_size']
-                num_posts = len(posts)
-                num_batches = (num_posts + batch_size - 1) // batch_size  # Ceiling division
-                batch_interval = duration_minutes / num_batches if num_batches > 1 else 0
-                start_time = session['batch_start_time']
-                
-                response = f"📋 <b>CONFIRMATION REQUIRED</b>\n\n"
-                response += f"📦 Total Posts: <b>{num_posts}</b>\n"
-                response += f"🎯 Batch Size: <b>{batch_size} posts per batch</b>\n"
-                response += f"📊 Number of Batches: <b>{num_batches}</b>\n"
-                response += f"📢 Channels: <b>{len(scheduler.channel_ids)}</b>\n"
-                response += f"🕐 Start Time: <b>{start_time.strftime('%Y-%m-%d %H:%M')}</b>\n"
-                response += f"⏱️ Total Duration: <b>{duration_minutes} minutes</b>\n"
-                response += f"⏳ Interval Between Batches: <b>{batch_interval:.1f} minutes</b>\n\n"
-                response += "<b>Batch Schedule Preview:</b>\n"
-                
-                for i in range(min(5, num_batches)):
-                    batch_time = start_time + timedelta(minutes=batch_interval * i)
-                    batch_start = i * batch_size + 1
-                    batch_end = min((i + 1) * batch_size, num_posts)
-                    response += f"• Batch #{i+1}: {batch_time.strftime('%H:%M')} - Posts #{batch_start}-{batch_end}\n"
-                
-                if num_batches > 5:
-                    response += f"\n<i>...and {num_batches - 5} more batches</i>\n"
-                
-                response += f"\n⚠️ Click <b>Confirm & Schedule</b> to proceed"
-                
-                await update.message.reply_text(
-                    response,
-                    reply_markup=get_confirmation_keyboard(),
-                    parse_mode='HTML'
-                )
-                return
-            
-            content = extract_content(update.message)
-            
-            if content:
-                session['posts'].append(content)
-                
-                count = len(session['posts'])
-                await update.message.reply_text(
-                    f"✅ Post #{count} added!\n\n"
-                    f"📊 Total posts collected: <b>{count}</b>\n\n"
-                    f"Send more posts or click <b>Done</b> to continue",
-                    reply_markup=get_bulk_collection_keyboard(),
-                    parse_mode='HTML'
-                )
-            return
-        
-        elif session['step'] == 'batch_confirm':
-            if "✅ Confirm" in message_text or "confirm" in message_text.lower():
-                await schedule_batch_posts(update, context)
                 return
             elif "❌" in message_text or "cancel" in message_text.lower():
                 await cancel(update, context)
@@ -1222,68 +1013,6 @@ async def schedule_bulk_posts(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     scheduler.user_sessions[user_id] = {'mode': None, 'step': 'choose_mode'}
 
-async def schedule_batch_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    session = scheduler.user_sessions[user_id]
-    
-    posts = session.get('posts', [])
-    duration_minutes = session['duration_minutes']
-    batch_size = session['batch_size']
-    start_time = session['batch_start_time']
-    num_posts = len(posts)
-    num_batches = (num_posts + batch_size - 1) // batch_size
-    batch_interval = duration_minutes / num_batches if num_batches > 1 else 0
-    
-    scheduled_info = []
-    
-    for i, post in enumerate(posts):
-        batch_number = i // batch_size
-        # All posts in same batch get same time (with 10 second spacing for safety)
-        post_in_batch = i % batch_size
-        scheduled_time = start_time + timedelta(minutes=batch_interval * batch_number, seconds=post_in_batch * 10)
-        
-        post_id = scheduler.schedule_post(
-            scheduled_time=scheduled_time,
-            message=post.get('message'),
-            media_type=post.get('media_type'),
-            media_file_id=post.get('media_file_id'),
-            caption=post.get('caption')
-        )
-        scheduled_info.append((post_id, scheduled_time, batch_number + 1))
-    
-    response = f"✅ <b>BATCH SCHEDULED SUCCESSFULLY!</b>\n\n"
-    response += f"📦 Total Posts: {num_posts}\n"
-    response += f"🎯 Batch Size: {batch_size} posts\n"
-    response += f"📊 Number of Batches: {num_batches}\n"
-    response += f"📢 Channels: {len(scheduler.channel_ids)}\n"
-    response += f"🕐 Start: {start_time.strftime('%Y-%m-%d %H:%M')}\n"
-    response += f"⏱️ Duration: {duration_minutes} min\n"
-    response += f"⏳ Batch Interval: {batch_interval:.1f} min\n"
-    response += f"🧹 Auto-cleanup: {scheduler.auto_cleanup_minutes} min after each post\n\n"
-    response += "<b>Batch Schedule Summary:</b>\n"
-    
-    current_batch = 0
-    for post_id, time, batch_num in scheduled_info[:10]:
-        if batch_num != current_batch:
-            if current_batch > 0:
-                response += "\n"
-            response += f"<b>Batch #{batch_num}</b> at {time.strftime('%H:%M')}:\n"
-            current_batch = batch_num
-        response += f"  • Post #{post_id}\n"
-    
-    if num_posts > 10:
-        response += f"\n<i>...and {num_posts - 10} more posts</i>\n"
-    
-    response += f"\nChoose another mode to continue:"
-    
-    await update.message.reply_text(
-        response,
-        reply_markup=get_mode_keyboard(),
-        parse_mode='HTML'
-    )
-    
-    scheduler.user_sessions[user_id] = {'mode': None, 'step': 'choose_mode'}
-
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset/delete all pending posts"""
     if update.effective_user.id != scheduler.admin_id:
@@ -1405,9 +1134,8 @@ def parse_duration_to_minutes(text):
     text = text.strip().lower()
     
     if text == 'today':
-        now = datetime.now(IST)
+        now = datetime.now()
         midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
-        midnight = IST.localize(midnight)
         return int((midnight - now).total_seconds() / 60)
     
     if text[-1] == 'm':
@@ -1525,8 +1253,9 @@ def main():
         logger.error("❌ BOT_TOKEN and ADMIN_ID must be set in environment variables!")
         sys.exit(1)
     
+    # Initialize scheduler (channels will be loaded from database)
     # Get channel IDs from environment variable
-CHANNEL_IDS_STR = os.environ.get('CHANNEL_IDS', '')
+    CHANNEL_IDS_STR = os.environ.get('CHANNEL_IDS', '')
 CHANNEL_IDS = [ch.strip() for ch in CHANNEL_IDS_STR.split(',') if ch.strip()]
 
 # Initialize scheduler
@@ -1541,6 +1270,7 @@ for channel_id in CHANNEL_IDS:
     scheduler.add_channel(channel_id)
 
 logger.info(f"📢 Loaded {len(CHANNEL_IDS)} channels from environment variables")
+
     
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
