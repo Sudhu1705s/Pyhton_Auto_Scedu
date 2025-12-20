@@ -209,11 +209,10 @@ class ThreeModeScheduler:
         
         logger.info(f"Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
         return successful
-    
-async def process_due_posts(self, bot):
+
+    async def process_due_posts(self, bot):
         with self.get_db() as conn:
             c = conn.cursor()
-            # Get current time in IST and convert to the format stored in DB
             now = datetime.now(IST).astimezone(pytz.UTC).replace(tzinfo=None).isoformat()
             c.execute('''
                 SELECT * FROM posts 
