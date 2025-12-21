@@ -61,6 +61,7 @@ class ThreeModeScheduler:
         self.init_database()
         self.load_channels()
         self.user_sessions = {}
+        self.posting_lock = asyncio.Lock()
     
     @contextmanager
     def get_db(self):
@@ -181,24 +182,37 @@ class ThreeModeScheduler:
                 
             except TelegramError as e:
                 logger.error(f"Failed channel {channel_id}: {e}")
-        
+         # Update database with retry logic
+    max_retries = 3
+for attempt in range(max_retries):
+    try:
         with self.get_db() as conn:
             c = conn.cursor()
             c.execute('UPDATE posts SET posted = 1, posted_at = ?, successful_posts = ? WHERE id = ?',
                      (datetime.utcnow().isoformat(), successful, post['id']))
             conn.commit()
-        
-        logger.info(f"Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
-        return successful
+        break
+    except sqlite3.OperationalError as e:
+        if attempt < max_retries - 1:
+            await asyncio.sleep(0.5)
+        else:
+            logger.error(f"Failed to update post {post['id']}: {e}")
+
+logger.info(f"Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
+return successful
 
     async def process_due_posts(self, bot):
-        """Check for posts due (UTC comparison)"""
+    """Check for posts due (UTC comparison)"""
+    async with self.posting_lock:
         with self.get_db() as conn:
             c = conn.cursor()
             now_utc = datetime.utcnow().isoformat()
-            c.execute('SELECT * FROM posts WHERE scheduled_time <= ? AND posted = 0 ORDER BY scheduled_time LIMIT 20',
+            c.execute('SELECT * FROM posts WHERE scheduled_time <= ? AND posted = 0 ORDER BY scheduled_time LIMIT 200',
                      (now_utc,))
             posts = c.fetchall()
+        
+        if posts:  # ADD THIS
+            logger.info(f"📤 Processing {len(posts)} due posts")  # ADD THIS
         
         for post in posts:
             await self.send_to_all_channels(bot, post)
@@ -1375,7 +1389,7 @@ async def schedule_batch_posts(update: Update, context: ContextTypes.DEFAULT_TYP
     for i, post in enumerate(posts):
         batch_number = i // batch_size
         post_in_batch = i % batch_size
-        scheduled_utc = start_utc + timedelta(minutes=batch_interval * batch_number)
+        scheduled_utc = start_utc + timedelta(minutes=batch_interval * batch_number, seconds=post_in_batch * 2)
         
         post_id = scheduler.schedule_post(
             scheduled_time_utc=scheduled_utc,
@@ -1433,14 +1447,14 @@ async def background_poster(application):
             await scheduler.process_due_posts(bot)
             
             cleanup_counter += 1
-            if cleanup_counter >= 1:
+            if cleanup_counter >= 2:
                 scheduler.cleanup_posted_content()
                 cleanup_counter = 0
                 
         except Exception as e:
             logger.error(f"Background task error: {e}")
         
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)
 
 async def post_init(application):
     asyncio.create_task(background_poster(application))
