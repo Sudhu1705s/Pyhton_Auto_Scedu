@@ -163,59 +163,49 @@ class ThreeModeScheduler:
             conn.commit()
             return c.lastrowid
     
-    async def send_to_all_channels(self, bot, post):
-    successful = 0
     
-    for channel_id in self.channel_ids:
-        try:
-            if post['media_type'] == 'photo':
-                await bot.send_photo(chat_id=channel_id, photo=post['media_file_id'], caption=post['caption'])
-            elif post['media_type'] == 'video':
-                await bot.send_video(chat_id=channel_id, video=post['media_file_id'], caption=post['caption'])
-            elif post['media_type'] == 'document':
-                await bot.send_document(chat_id=channel_id, document=post['media_file_id'], caption=post['caption'])
-            else:
-                await bot.send_message(chat_id=channel_id, text=post['message'])
-            
-            successful += 1
-            await asyncio.sleep(0.1)
-            
-        except TelegramError as e:
-            logger.error(f"Failed channel {channel_id}: {e}")
-    
-    # Update database with retry logic
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            with self.get_db() as conn:
-                c = conn.cursor()
-                c.execute('UPDATE posts SET posted = 1, posted_at = ?, successful_posts = ? WHERE id = ?',
-                         (datetime.utcnow().isoformat(), successful, post['id']))
-                conn.commit()
-            break
-        except sqlite3.OperationalError as e:
-            if attempt < max_retries - 1:
-                await asyncio.sleep(0.5)
-            else:
-                logger.error(f"Failed to update post {post['id']}: {e}")
-    
-    logger.info(f"Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
-    return successful
-
-
-async def process_due_posts(self, bot):
-    """Check for posts due (UTC comparison)"""
-    async with self.posting_lock:
+async def send_to_all_channels(self, bot, post):
+        successful = 0
+        
+        for channel_id in self.channel_ids:
+            try:
+                if post['media_type'] == 'photo':
+                    await bot.send_photo(chat_id=channel_id, photo=post['media_file_id'], caption=post['caption'])
+                elif post['media_type'] == 'video':
+                    await bot.send_video(chat_id=channel_id, video=post['media_file_id'], caption=post['caption'])
+                elif post['media_type'] == 'document':
+                    await bot.send_document(chat_id=channel_id, document=post['media_file_id'], caption=post['caption'])
+                else:
+                    await bot.send_message(chat_id=channel_id, text=post['message'])
+                
+                successful += 1
+                await asyncio.sleep(0.1)
+                
+            except TelegramError as e:
+                logger.error(f"Failed channel {channel_id}: {e}")
+        
         with self.get_db() as conn:
             c = conn.cursor()
-            now_utc = datetime.utcnow().isoformat()
-            c.execute('SELECT * FROM posts WHERE scheduled_time <= ? AND posted = 0 ORDER BY scheduled_time LIMIT 200',
-                     (now_utc,))
-            posts = c.fetchall()
+            c.execute('UPDATE posts SET posted = 1, posted_at = ?, successful_posts = ? WHERE id = ?',
+                     (datetime.utcnow().isoformat(), successful, post['id']))
+            conn.commit()
         
-        for post in posts:
-            await self.send_to_all_channels(bot, post)
-            await asyncio.sleep(2)
+        logger.info(f"Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
+        return successful
+
+    async def process_due_posts(self, bot):
+        """Check for posts due (UTC comparison)"""
+        async with self.posting_lock:
+            with self.get_db() as conn:
+                c = conn.cursor()
+                now_utc = datetime.utcnow().isoformat()
+                c.execute('SELECT * FROM posts WHERE scheduled_time <= ? AND posted = 0 ORDER BY scheduled_time LIMIT 200',
+                         (now_utc,))
+                posts = c.fetchall()
+            
+            for post in posts:
+                await self.send_to_all_channels(bot, post)
+                await asyncio.sleep(2)
 
     
     
