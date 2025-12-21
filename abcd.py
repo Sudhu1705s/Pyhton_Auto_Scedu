@@ -201,7 +201,7 @@ for attempt in range(max_retries):
 logger.info(f"Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
 return successful
 
-    async def process_due_posts(self, bot):
+async def process_due_posts(self, bot):
     """Check for posts due (UTC comparison)"""
     async with self.posting_lock:
         with self.get_db() as conn:
@@ -210,9 +210,6 @@ return successful
             c.execute('SELECT * FROM posts WHERE scheduled_time <= ? AND posted = 0 ORDER BY scheduled_time LIMIT 200',
                      (now_utc,))
             posts = c.fetchall()
-        
-        if posts:  # ADD THIS
-            logger.info(f"📤 Processing {len(posts)} due posts")  # ADD THIS
         
         for post in posts:
             await self.send_to_all_channels(bot, post)
