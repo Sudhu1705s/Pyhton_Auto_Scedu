@@ -164,7 +164,7 @@ class ThreeModeScheduler:
             return c.lastrowid
     
     
-async def send_to_all_channels(self, bot, post):
+    async def send_to_all_channels(self, bot, post):
         successful = 0
         
         for channel_id in self.channel_ids:
