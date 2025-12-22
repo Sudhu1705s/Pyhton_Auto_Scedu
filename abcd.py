@@ -167,8 +167,7 @@ class ThreeModeScheduler:
     async def send_to_all_channels(self, bot, post):
         successful = 0
         
-        # Helper function to send to one channel
-        async def send_to_channel(channel_id):
+        for channel_id in self.channel_ids:
             try:
                 if post['media_type'] == 'photo':
                     await bot.send_photo(chat_id=channel_id, photo=post['media_file_id'], caption=post['caption'])
@@ -178,22 +177,12 @@ class ThreeModeScheduler:
                     await bot.send_document(chat_id=channel_id, document=post['media_file_id'], caption=post['caption'])
                 else:
                     await bot.send_message(chat_id=channel_id, text=post['message'])
-                return True
+                
+                successful += 1
+                await asyncio.sleep(0.1)
+                
             except TelegramError as e:
                 logger.error(f"Failed channel {channel_id}: {e}")
-                return False
-        
-        # Send to channels in batches of 20 to avoid rate limits
-        batch_size = 20
-        for i in range(0, len(self.channel_ids), batch_size):
-            batch = self.channel_ids[i:i + batch_size]
-            tasks = [send_to_channel(ch_id) for ch_id in batch]
-            results = await asyncio.gather(*tasks)
-            successful += sum(results)
-            
-            # Small delay between batches to respect rate limits
-            if i + batch_size < len(self.channel_ids):
-                await asyncio.sleep(0.5)
         
         with self.get_db() as conn:
             c = conn.cursor()
@@ -216,7 +205,7 @@ class ThreeModeScheduler:
             
             for post in posts:
                 await self.send_to_all_channels(bot, post)
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
 
     
     
@@ -1491,47 +1480,6 @@ async def export_channels_command(update: Update, context: ContextTypes.DEFAULT_
     
     await update.message.reply_text(export_text, parse_mode='HTML', reply_markup=get_mode_keyboard())
 
-async def backup_posts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Export all pending posts as commands"""
-    if update.effective_user.id != scheduler.admin_id:
-        return
-    
-    posts = scheduler.get_pending_posts()
-    
-    if not posts:
-        await update.message.reply_text("No pending posts to backup!", reply_markup=get_mode_keyboard())
-        return
-    
-    # Group posts by scheduled time for better readability
-    backup_text = "📦 <b>POSTS BACKUP</b>\n\n"
-    backup_text += f"Total pending posts: <b>{len(posts)}</b>\n\n"
-    backup_text += "⚠️ <b>IMPORTANT:</b> Copy this entire message and save it somewhere safe!\n\n"
-    backup_text += "=" * 30 + "\n\n"
-    
-    for post in posts[:50]:  # Limit to 50 to avoid message too long
-        scheduled_utc = datetime.fromisoformat(post['scheduled_time'])
-        scheduled_ist = utc_to_ist(scheduled_utc)
-        
-        backup_text += f"🆔 Post #{post['id']}\n"
-        backup_text += f"📅 Time: {scheduled_ist.strftime('%Y-%m-%d %H:%M')} IST\n"
-        
-        if post['message']:
-            preview = post['message'][:50] + "..." if len(post['message']) > 50 else post['message']
-            backup_text += f"📝 Text: {preview}\n"
-        elif post['media_type']:
-            backup_text += f"📎 Media: {post['media_type']}\n"
-            if post['caption']:
-                preview = post['caption'][:50] + "..." if len(post['caption']) > 50 else post['caption']
-                backup_text += f"📝 Caption: {preview}\n"
-        
-        backup_text += "\n"
-    
-    if len(posts) > 50:
-        backup_text += f"\n⚠️ Showing first 50 posts. Total: {len(posts)}\n"
-    
-    backup_text += "\n💡 To restore: Schedule posts manually using the bot after restart.\n"
-    
-    await update.message.reply_text(backup_text, parse_mode='HTML', reply_markup=get_mode_keyboard())
 
 # MAIN FUNCTION
 def main():
@@ -1566,7 +1514,6 @@ def main():
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("exportchannels", export_channels_command))
-    app.add_handler(CommandHandler("backup", backup_posts_command))
     
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     
