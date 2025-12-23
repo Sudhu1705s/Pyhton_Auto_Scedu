@@ -664,6 +664,10 @@ def extract_content(message):
 
 # MESSAGE HANDLER - Main conversation flow
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # FIX: Check if update has a user before accessing it
+    if not update.effective_user:
+        return  # Ignore updates without a user (channel posts, system messages, etc.)
+    
     if update.effective_user.id != scheduler.admin_id:
         return
     
@@ -674,6 +678,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     session = scheduler.user_sessions[user_id]
     message_text = update.message.text if update.message.text else ""
+    
+    # ... rest of your code stays the same ...
     
     # Handle button presses for commands
     if "📊 Stats" in message_text or "stats" in message_text.lower():
