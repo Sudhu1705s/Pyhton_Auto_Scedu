@@ -165,14 +165,14 @@ class ThreeModeScheduler:
             return c.lastrowid
     
     
-    async def send_to_all_channels(self, bot, post):  # 4 spaces
-        successful = 0  # 8 spaces
-        
-        # Helper function to send to one channel with retry  # 8 spaces
-        async def send_to_channel(channel_id, max_retries=5):  # 8 spaces
-            for attempt in range(max_retries):  # 12 spaces
-                try:  # 16 spaces
-                    if post['media_type'] == 'photo':  # 20 spaces
+    async def send_to_all_channels(self, bot, post):
+        successful = 0
+    
+    # Helper function to send to one channel with retry
+        async def send_to_channel(channel_id, max_retries=5):
+            for attempt in range(max_retries):
+                try:
+                    if post['media_type'] == 'photo':
                     await bot.send_photo(
                         chat_id=channel_id, 
                         photo=post['media_file_id'], 
@@ -181,7 +181,7 @@ class ThreeModeScheduler:
                         write_timeout=60,
                         connect_timeout=60
                     )
-                elif post['media_type'] == 'video':
+                    elif post['media_type'] == 'video':
                     await bot.send_video(
                         chat_id=channel_id, 
                         video=post['media_file_id'], 
@@ -190,7 +190,7 @@ class ThreeModeScheduler:
                         write_timeout=60,
                         connect_timeout=60
                     )
-                elif post['media_type'] == 'document':
+                    elif post['media_type'] == 'document':
                     await bot.send_document(
                         chat_id=channel_id, 
                         document=post['media_file_id'], 
@@ -199,7 +199,7 @@ class ThreeModeScheduler:
                         write_timeout=60,
                         connect_timeout=60
                     )
-                else:
+                    else:
                     await bot.send_message(
                         chat_id=channel_id, 
                         text=post['message'],
@@ -208,7 +208,7 @@ class ThreeModeScheduler:
                         connect_timeout=60
                     )
                 return True
-            except (TimedOut, NetworkError) as e:
+             except (TimedOut, NetworkError) as e:
                 if attempt < max_retries - 1:
                     wait_time = (attempt + 1) * 3  # 3, 6, 9, 12, 15 seconds
                     logger.warning(f"⏳ Retry {attempt+1}/{max_retries} for {channel_id} in {wait_time}s: {e}")
@@ -218,8 +218,7 @@ class ThreeModeScheduler:
                     return False
             except TelegramError as e:
                 logger.error(f"❌ Failed channel {channel_id}: {e}")
-                return False
-    
+                return False    
     # Send to channels in batches of 20 to avoid rate limits
     batch_size = 20
     for i in range(0, len(self.channel_ids), batch_size):
