@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timedelta
 from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.error import TelegramError
+from telegram.error import TelegramError, TimedOut, NetworkError
 import logging
 from contextlib import contextmanager
 import sys
@@ -62,6 +62,7 @@ class ThreeModeScheduler:
         self.load_channels()
         self.user_sessions = {}
         self.posting_lock = asyncio.Lock()
+        self.stats = {'restarts': 0}
     
     @contextmanager
     def get_db(self):
@@ -165,44 +166,80 @@ class ThreeModeScheduler:
     
     
     async def send_to_all_channels(self, bot, post):
-        successful = 0
-        
-        # Helper function to send to one channel
-        async def send_to_channel(channel_id):
+    successful = 0
+    
+    # Helper function to send to one channel with retry
+    async def send_to_channel(channel_id, max_retries=5):
+        for attempt in range(max_retries):
             try:
                 if post['media_type'] == 'photo':
-                    await bot.send_photo(chat_id=channel_id, photo=post['media_file_id'], caption=post['caption'])
+                    await bot.send_photo(
+                        chat_id=channel_id, 
+                        photo=post['media_file_id'], 
+                        caption=post['caption'],
+                        read_timeout=60,
+                        write_timeout=60,
+                        connect_timeout=60
+                    )
                 elif post['media_type'] == 'video':
-                    await bot.send_video(chat_id=channel_id, video=post['media_file_id'], caption=post['caption'])
+                    await bot.send_video(
+                        chat_id=channel_id, 
+                        video=post['media_file_id'], 
+                        caption=post['caption'],
+                        read_timeout=60,
+                        write_timeout=60,
+                        connect_timeout=60
+                    )
                 elif post['media_type'] == 'document':
-                    await bot.send_document(chat_id=channel_id, document=post['media_file_id'], caption=post['caption'])
+                    await bot.send_document(
+                        chat_id=channel_id, 
+                        document=post['media_file_id'], 
+                        caption=post['caption'],
+                        read_timeout=60,
+                        write_timeout=60,
+                        connect_timeout=60
+                    )
                 else:
-                    await bot.send_message(chat_id=channel_id, text=post['message'])
+                    await bot.send_message(
+                        chat_id=channel_id, 
+                        text=post['message'],
+                        read_timeout=60,
+                        write_timeout=60,
+                        connect_timeout=60
+                    )
                 return True
+            except (TimedOut, NetworkError) as e:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3  # 3, 6, 9, 12, 15 seconds
+                    logger.warning(f"⏳ Retry {attempt+1}/{max_retries} for {channel_id} in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"❌ Failed {channel_id} after {max_retries} attempts: {e}")
+                    return False
             except TelegramError as e:
-                logger.error(f"Failed channel {channel_id}: {e}")
+                logger.error(f"❌ Failed channel {channel_id}: {e}")
                 return False
+    
+    # Send to channels in batches of 20 to avoid rate limits
+    batch_size = 20
+    for i in range(0, len(self.channel_ids), batch_size):
+        batch = self.channel_ids[i:i + batch_size]
+        tasks = [send_to_channel(ch_id) for ch_id in batch]
+        results = await asyncio.gather(*tasks)
+        successful += sum(results)
         
-        # Send to channels in batches of 20 to avoid rate limits
-        batch_size = 20
-        for i in range(0, len(self.channel_ids), batch_size):
-            batch = self.channel_ids[i:i + batch_size]
-            tasks = [send_to_channel(ch_id) for ch_id in batch]
-            results = await asyncio.gather(*tasks)
-            successful += sum(results)
-            
-            # Small delay between batches to respect rate limits
-            if i + batch_size < len(self.channel_ids):
-                await asyncio.sleep(0.5)
-        
-        with self.get_db() as conn:
-            c = conn.cursor()
-            c.execute('UPDATE posts SET posted = 1, posted_at = ?, successful_posts = ? WHERE id = ?',
-                     (datetime.utcnow().isoformat(), successful, post['id']))
-            conn.commit()
-        
-        logger.info(f"Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
-        return successful
+        # Delay between batches to respect rate limits
+        if i + batch_size < len(self.channel_ids):
+            await asyncio.sleep(2.0)  # ✅ Changed from 0.5 to 2.0
+    
+    with self.get_db() as conn:
+        c = conn.cursor()
+        c.execute('UPDATE posts SET posted = 1, posted_at = ?, successful_posts = ? WHERE id = ?',
+                 (datetime.utcnow().isoformat(), successful, post['id']))
+        conn.commit()
+    
+    logger.info(f"📊 Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
+    return successful
 
     async def process_due_posts(self, bot):
         """Check for posts due (UTC comparison)"""
@@ -1560,7 +1597,17 @@ def main():
     
     logger.info(f"📢 Loaded {len(CHANNEL_IDS)} channels from environment variables")
     
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    from telegram.request import HTTPXRequest
+
+    request = HTTPXRequest(
+    connection_pool_size=20,
+    connect_timeout=90.0,
+    read_timeout=90.0,
+    write_timeout=90.0,
+    pool_timeout=90.0
+    )
+    
+    app = Application.builder().token(BOT_TOKEN).request(request).post_init(post_init).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("list", list_posts))
@@ -1584,7 +1631,7 @@ def main():
     logger.info(f"🌍 Timezone: All times stored in UTC, displayed in IST")
     logger.info("="*60)
     
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
