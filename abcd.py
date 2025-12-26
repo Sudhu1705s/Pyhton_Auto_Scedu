@@ -220,25 +220,25 @@ class ThreeModeScheduler:
                     logger.error(f"❌ Failed channel {channel_id}: {e}")
                     return False    
     # Send to channels in batches of 20 to avoid rate limits
-    batch_size = 20
-    for i in range(0, len(self.channel_ids), batch_size):
-        batch = self.channel_ids[i:i + batch_size]
-        tasks = [send_to_channel(ch_id) for ch_id in batch]
-        results = await asyncio.gather(*tasks)
-        successful += sum(results)
+        batch_size = 20
+        for i in range(0, len(self.channel_ids), batch_size):
+            batch = self.channel_ids[i:i + batch_size]
+            tasks = [send_to_channel(ch_id) for ch_id in batch]
+            results = await asyncio.gather(*tasks)
+            successful += sum(results)
         
         # Delay between batches to respect rate limits
-        if i + batch_size < len(self.channel_ids):
-            await asyncio.sleep(2.0)  # ✅ Changed from 0.5 to 2.0
+            if i + batch_size < len(self.channel_ids):
+                await asyncio.sleep(2.0)  # ✅ Changed from 0.5 to 2.0
     
-    with self.get_db() as conn:
-        c = conn.cursor()
-        c.execute('UPDATE posts SET posted = 1, posted_at = ?, successful_posts = ? WHERE id = ?',
-                 (datetime.utcnow().isoformat(), successful, post['id']))
-        conn.commit()
+        with self.get_db() as conn:
+            c = conn.cursor()
+            c.execute('UPDATE posts SET posted = 1, posted_at = ?, successful_posts = ? WHERE id = ?',
+                     (datetime.utcnow().isoformat(), successful, post['id']))
+            conn.commit()
     
-    logger.info(f"📊 Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
-    return successful
+        logger.info(f"📊 Post {post['id']}: {successful}/{len(self.channel_ids)} channels")
+        return successful
 
     async def process_due_posts(self, bot):
         """Check for posts due (UTC comparison)"""
