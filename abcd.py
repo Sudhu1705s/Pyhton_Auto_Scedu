@@ -173,52 +173,52 @@ class ThreeModeScheduler:
             for attempt in range(max_retries):
                 try:
                     if post['media_type'] == 'photo':
-                    await bot.send_photo(
-                        chat_id=channel_id, 
-                        photo=post['media_file_id'], 
-                        caption=post['caption'],
-                        read_timeout=60,
-                        write_timeout=60,
-                        connect_timeout=60
+                        await bot.send_photo(
+                            chat_id=channel_id, 
+                            photo=post['media_file_id'], 
+                            caption=post['caption'],
+                            read_timeout=60,
+                            write_timeout=60,
+                            connect_timeout=60
                     )
                     elif post['media_type'] == 'video':
-                    await bot.send_video(
-                        chat_id=channel_id, 
-                        video=post['media_file_id'], 
-                        caption=post['caption'],
-                        read_timeout=60,
-                        write_timeout=60,
-                        connect_timeout=60
-                    )
+                        await bot.send_video(
+                            chat_id=channel_id, 
+                            video=post['media_file_id'], 
+                            caption=post['caption'],
+                            read_timeout=60,
+                            write_timeout=60,
+                            connect_timeout=60
+                        )
                     elif post['media_type'] == 'document':
-                    await bot.send_document(
-                        chat_id=channel_id, 
-                        document=post['media_file_id'], 
-                        caption=post['caption'],
-                        read_timeout=60,
-                        write_timeout=60,
-                        connect_timeout=60
-                    )
+                        await bot.send_document(
+                            chat_id=channel_id, 
+                            document=post['media_file_id'], 
+                            caption=post['caption'],
+                            read_timeout=60,
+                            write_timeout=60,
+                            connect_timeout=60
+                        )
                     else:
-                    await bot.send_message(
-                        chat_id=channel_id, 
-                        text=post['message'],
-                        read_timeout=60,
-                        write_timeout=60,
-                        connect_timeout=60
-                    )
-                return True
-             except (TimedOut, NetworkError) as e:
-                if attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 3  # 3, 6, 9, 12, 15 seconds
-                    logger.warning(f"⏳ Retry {attempt+1}/{max_retries} for {channel_id} in {wait_time}s: {e}")
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"❌ Failed {channel_id} after {max_retries} attempts: {e}")
-                    return False
-            except TelegramError as e:
-                logger.error(f"❌ Failed channel {channel_id}: {e}")
-                return False    
+                        await bot.send_message(
+                            chat_id=channel_id, 
+                            text=post['message'],
+                            read_timeout=60,
+                            write_timeout=60,
+                            connect_timeout=60
+                        )
+                    return True
+                except (TimedOut, NetworkError) as e:
+                     if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 3  # 3, 6, 9, 12, 15 seconds
+                        logger.warning(f"⏳ Retry {attempt+1}/{max_retries} for {channel_id} in {wait_time}s: {e}")
+                        await asyncio.sleep(wait_time)
+                     else:
+                        logger.error(f"❌ Failed {channel_id} after {max_retries} attempts: {e}")
+                        return False
+                except TelegramError as e:
+                    logger.error(f"❌ Failed channel {channel_id}: {e}")
+                    return False    
     # Send to channels in batches of 20 to avoid rate limits
     batch_size = 20
     for i in range(0, len(self.channel_ids), batch_size):
