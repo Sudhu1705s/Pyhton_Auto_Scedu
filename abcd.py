@@ -165,14 +165,14 @@ class ThreeModeScheduler:
             return c.lastrowid
     
     
-    async def send_to_all_channels(self, bot, post):
-    successful = 0
-    
-    # Helper function to send to one channel with retry
-    async def send_to_channel(channel_id, max_retries=5):
-        for attempt in range(max_retries):
-            try:
-                if post['media_type'] == 'photo':
+    async def send_to_all_channels(self, bot, post):  # 4 spaces
+        successful = 0  # 8 spaces
+        
+        # Helper function to send to one channel with retry  # 8 spaces
+        async def send_to_channel(channel_id, max_retries=5):  # 8 spaces
+            for attempt in range(max_retries):  # 12 spaces
+                try:  # 16 spaces
+                    if post['media_type'] == 'photo':  # 20 spaces
                     await bot.send_photo(
                         chat_id=channel_id, 
                         photo=post['media_file_id'], 
