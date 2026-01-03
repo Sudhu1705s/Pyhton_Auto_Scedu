@@ -585,6 +585,197 @@ class ThreeModeScheduler:
             if db_url.startswith('postgres://'):
                 db_url = db_url.replace('postgres://', 'postgresql://', 1)
             conn = psycopg2.connect(db_url, connect_timeout=10, sslmode='require')
+            conn.autocommit = False
+            try:
+                yield conn
+            finally:
+                conn.close()
+        else:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+            finally:
+                conn.close()
+
+    def init_database(self):
+        with self.get_db() as conn:
+            c = conn.cursor()
+            is_postgres = os.environ.get('DATABASE_URL') is not None
+            
+            if is_postgres:
+                c.execute('''
+                    CREATE TABLE IF NOT EXISTS posts (
+                        id SERIAL PRIMARY KEY,
+                        message TEXT,
+                        media_type TEXT,
+                        media_file_id TEXT,
+                        caption TEXT,
+                        scheduled_time TIMESTAMP NOT NULL,
+                        posted INTEGER DEFAULT 0,
+                        total_channels INTEGER DEFAULT 0,
+                        successful_posts INTEGER DEFAULT 0,
+                        posted_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        batch_id TEXT
+                    )
+                ''')
+                
+                c.execute('''
+                    CREATE TABLE IF NOT EXISTS channels (
+                        id SERIAL PRIMARY KEY,
+                        channel_id TEXT UNIQUE NOT NULL,
+                        channel_name TEXT,
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        active INTEGER DEFAULT 1,
+                        failure_count INTEGER DEFAULT 0,
+                        last_success TIMESTAMP
+                    )
+                ''')
+            else:
+                c.execute('''
+                    CREATE TABLE IF NOT EXISTS posts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        message TEXT,
+                        media_type TEXT,
+                        media_file_id TEXT,
+                        caption TEXT,
+                        scheduled_time TIMESTAMP NOT NULL,
+                        posted INTEGER DEFAULT 0,
+                        total_channels INTEGER DEFAULT 0,
+                        successful_posts INTEGER DEFAULT 0,
+                        posted_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        batch_id TEXT
+                    )
+                ''')
+                
+                c.execute('''
+                    CREATE TABLE IF NOT EXISTS channels (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        channel_id TEXT UNIQUE NOT NULL,
+                        channel_name TEXT,
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        active INTEGER DEFAULT 1,
+                        failure_count INTEGER DEFAULT 0,
+                        last_success TIMESTAMP
+                    )
+                ''')
+            
+            c.execute('CREATE INDEX IF NOT EXISTS idx_scheduled_posted ON posts(scheduled_time, posted)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_posted_at ON posts(posted_at)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_channel_active ON channels(active)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_batch_id ON posts(batch_id)')
+            
+            conn.commit()
+            logger.info(f"✅ Database initialized ({'PostgreSQL' if is_postgres else 'SQLite'})")
+
+    def load_channels(self):
+        with self.get_db() as conn:
+            c = conn.cursor()
+            c.execute('SELECT channel_id FROM channels WHERE active = 1')
+            self.channel_ids = [row[0] for row in c.fetchall()]
+        self.update_channel_numbers()
+        logger.info(f"📢 Loaded {len(self.channel_ids)} active channels")
+    
+    def update_channel_numbers(self):
+        """IMPROVEMENT #4: Channel numbering"""
+        self.channel_number_map = {}
+        with self.get_db() as conn:
+            c = conn.cursor()
+            c.execute('SELECT channel_id FROM channels WHERE active = 1 ORDER BY added_at')
+            for idx, row in enumerate(c.fetchall(), 1):
+                self.channel_number_map[idx] = row[0]
+    
+    def get_channel_by_number(self, number: int):
+        return self.channel_number_map.get(number)
+    
+    def add_channel(self, channel_id, channel_name=None):
+        """Add a single channel"""
+        with self.get_db() as conn:
+            c = conn.cursor()
+            try:
+                c.execute('INSERT INTO channels (channel_id, channel_name, active) VALUES (?, ?, 1)',
+                         (channel_id, channel_name))
+                conn.commit()
+                self.load_channels()
+                logger.info(f"✅ Added channel: {channel_id}")
+                return True
+            except:
+                # Channel exists, just activate it
+                c.execute('UPDATE channels SET active = 1 WHERE channel_id = ?', (channel_id,))
+                conn.commit()
+                self.load_channels()
+                return True
+    
+    def add_channels_bulk(self, commands: str):
+        """IMPROVEMENT #3: Multi-command import"""
+        lines = commands.strip().split('\n')
+        added = 0
+        failed = 0
+        
+        for line in lines:
+            line = line.strip()
+            if not line.startswith('/addchannel'):
+                continue
+            
+            parts = line.split()
+            if len(parts) < 2:
+                failed += 1
+                continue
+            
+            channel_id = parts[1]
+            channel_name = " ".join(parts[2:]) if len(parts) > 2 else None
+            
+            try:
+                if self.add_channel(channel_id, channel_name):
+                    added += 1
+                else:
+                    failed += 1
+            except:
+                failed += 1
+        
+        return added, failed
+    
+    def remove_channel(self, channel_id):
+        """Remove/deactivate a single channel"""
+        with self.get_db() as conn:
+            c = conn.cursor()
+            c.execute('DELETE FROM channels WHERE channel_id = ?', (channel_id,))
+            deleted = c.rowcount > 0
+            conn.commit()
+            if deleted:
+                self.load_channels()
+                logger.info(f"🗑️ Removed channel: {channel_id}")
+            return deleted
+    
+    def remove_channels_by_numbers(self, numbers: List[int]):
+        """IMPROVEMENT #4: Delete channels by numbers"""
+        deleted = 0
+        for num in numbers:
+            channel_id = self.get_channel_by_number(num)
+            if channel_id and self.remove_channel(channel_id):
+                deleted += 1
+        return deleted
+    
+    def get_all_channels(self):
+        """Get all channels from database"""
+        with self.get_db() as conn:
+            c = conn.cursor()
+            c.execute('SELECT channel_id, channel_name, active, added_at FROM channels ORDER BY added_at')
+            return c.fetchall()
+    
+    def schedule_post(self, scheduled_time_utc, message=None, media_type=None, 
+                     media_file_id=None, caption=None, batch_id=None):
+        """Schedule a post. scheduled_time_utc MUST be UTC datetime"""
+        with self.get_db() as conn:
+            c = conn.cursor()
+            c.execute('''
+                INSERT INTO posts (message, media_type, media_file_id, caption, 
+                                 scheduled_time, total_channels, batch_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (message, media_type, media_file_id, caption, 
+                  scheduled_time_utc.isoformat(), len(self.channel_ids), batch_id))
             conn.commit()
             return c.lastrowid
     
@@ -2007,3 +2198,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
