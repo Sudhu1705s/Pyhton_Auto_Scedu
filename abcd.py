@@ -805,7 +805,7 @@ class ThreeModeScheduler:
             if 'flood' in str(e).lower() or 'too many requests' in str(e).lower():
                 self.rate_limiter.report_flood_control()
             
-            self.retry_system.record_failure(channel_id, e, post.get('id'))
+            self.retry_system.record_failure(channel_id, e, post['id'])
             logger.error(f"❌ Failed {channel_id}: {e}")
             return False
     
@@ -903,7 +903,7 @@ class ThreeModeScheduler:
             
             for post in posts:
                 scheduled_time = datetime.fromisoformat(post['scheduled_time'])
-                batch_id = post.get('batch_id')
+                batch_id = post['batch_id']
                 
                 if last_time is None:
                     current_batch = [post]
@@ -2198,4 +2198,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
