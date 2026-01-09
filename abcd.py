@@ -1938,7 +1938,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # BATCH MODE (Similar structure with IMPROVEMENT #13 & #22)
     # ============ MODE 2: BATCH POSTS ============
-elif session['mode'] == 'batch':
+   elif session['mode'] == 'batch':
        
        if "❌" in message_text or "cancel" in message_text.lower():
            await cancel(update, context)
