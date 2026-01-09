@@ -1087,7 +1087,8 @@ def get_mode_keyboard():
         [KeyboardButton("📅 Exact Time/Date")],
         [KeyboardButton("⏱️ Duration (Wait Time)")],
         [KeyboardButton("📋 View Pending"), KeyboardButton("📊 Stats")],
-        [KeyboardButton("📢 Channels"), KeyboardButton("❌ Cancel")]
+        [KeyboardButton("📢 Channels"), KeyboardButton("❓ Help")],
+        [KeyboardButton("❌ Cancel")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
@@ -1729,6 +1730,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "📢 Channels" in message_text:
         await channels_command(update, context)
         return
+
+    if "❓ Help" in message_text:  # ← ADD THIS
+       await help_command(update, context)
+       return
     
     # STEP 1: CHOOSE MODE
     if session['step'] == 'choose_mode':
@@ -2023,6 +2028,132 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await cancel(update, context)
                 return
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all available commands"""
+    if update.effective_user.id != scheduler.admin_id:
+        return
+    
+    help_text = """
+🤖 <b>TELEGRAM SCHEDULER v2.0 - COMMAND LIST</b>
+
+<b>📋 BASIC COMMANDS</b>
+/start - Start the bot and show main menu
+/help - Show this help message
+/stats - Show database statistics and analytics
+/cancel - Cancel current operation
+
+<b>📢 CHANNEL MANAGEMENT</b>
+/channels - List all channels (numbered)
+/addchannel [id] [name] - Add single channel
+  Example: <code>/addchannel -1001234567890 My Channel</code>
+  
+/addchannel (multi-line) - Bulk import channels
+  Paste multiple /addchannel commands at once
+  
+/deletechannel [number] - Delete channel by number
+  Examples: 
+  • <code>/deletechannel 5</code> (delete #5)
+  • <code>/deletechannel 5-10</code> (delete range)
+  • <code>/deletechannel all confirm</code> (delete all)
+  
+/exportchannels - Export channels as /addchannel commands
+/channelhealth - Show channel health report
+/test [number] - Test if channel #N is reachable
+  Example: <code>/test 5</code>
+
+<b>📋 POST MANAGEMENT</b>
+/list - List pending posts (numbered)
+/lastpost - Show last scheduled post info
+/lastpostbatch - Show last scheduled batch info
+
+/deletepost [number] - Delete post by number
+  Examples:
+  • <code>/deletepost 5</code> (delete #5)
+  • <code>/deletepost 5-10</code> (delete range)
+  • <code>/deletepost all confirm</code> (delete all)
+  
+/movepost [numbers] [time] - Reschedule posts
+  Examples:
+  • <code>/movepost 5 20:00</code>
+  • <code>/movepost 5-10 tomorrow 9am</code>
+
+<b>⚡ EMERGENCY CONTROLS</b>
+/stopall - Emergency stop (pause all posting)
+/resumeall - Resume operations
+/reset confirm - Delete ALL channels and posts
+
+<b>🎯 SCHEDULING MODES (from main menu)</b>
+📦 <b>Bulk Posts (Auto-Space)</b>
+   - Schedule multiple posts with even spacing
+   - Supports 0m duration (all at once)
+   - Example: 30 posts over 2 hours
+
+🎯 <b>Bulk Posts (Batches)</b>
+   - Schedule posts in batches
+   - Example: 30 posts in 3 batches of 10
+
+📅 <b>Exact Time/Date</b>
+   - Schedule single post at specific time
+   - Example: tomorrow 9am
+
+⏱️ <b>Duration (Wait Time)</b>
+   - Schedule single post after delay
+   - Example: 2h from now
+
+<b>⏰ TIME FORMATS</b>
+All times in IST (Indian Standard Time)
+
+<b>Relative:</b>
+- <code>now</code> - Immediately
+- <code>30m</code> - In 30 minutes
+- <code>2h</code> - In 2 hours
+- <code>1d</code> - In 1 day
+
+<b>Specific:</b>
+- <code>today 18:00</code> - Today at 6 PM
+- <code>tomorrow 9am</code> - Tomorrow at 9 AM
+- <code>2026-01-31 20:00</code> - Exact date/time
+
+<b>Duration/End Time:</b>
+- <code>0m</code> - Zero duration (all at once)
+- <code>6h</code> - Spread over 6 hours
+- <code>2026-01-31 23:00</code> - Until this time
+
+<b>🎨 FEATURES</b>
+✅ PostgreSQL & SQLite support
+✅ Parallel sending (20-25 msg/sec)
+✅ Auto-retry failed sends
+✅ Live backup system
+✅ Channel health monitoring
+✅ Emergency stop/resume
+✅ Adaptive rate limiting
+✅ Real-time progress logs
+
+<b>💡 PRO TIPS</b>
+- Use /exportchannels before major changes
+- Use /channelhealth to check channel status
+- Use /test before bulk sending
+- Use /stopall if something goes wrong
+- All data persists across restarts
+
+<b>📊 EXAMPLE WORKFLOW</b>
+1. <code>/addchannel -1001234567890 Channel1</code>
+2. <code>/channels</code> (verify)
+3. <code>/test 1</code> (test channel)
+4. Choose mode: 📦 Bulk Posts
+5. Set time: <code>now</code>
+6. Set duration: <code>2h</code>
+7. Send posts → Done → Confirm
+8. <code>/list</code> (verify scheduled)
+
+Need help? Ask admin for support!
+"""
+    
+    await update.message.reply_text(
+        help_text,
+        parse_mode='HTML',
+        reply_markup=get_mode_keyboard()
+    )
 # =============================================================================
 # SCHEDULING FUNCTIONS
 # =============================================================================
@@ -2089,6 +2220,89 @@ async def schedule_bulk_posts(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     scheduler.user_sessions[user_id] = {'mode': None, 'step': 'choose_mode'}
 
+
+async def lastpost_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show detailed information about the last scheduled post"""
+    if update.effective_user.id != scheduler.admin_id:
+        return
+    
+    last_post = scheduler.get_last_post()
+    
+    if not last_post:
+        await update.message.reply_text(
+            "📋 <b>No Pending Posts</b>\n\n"
+            "You haven't scheduled any posts yet.\n"
+            "Use the main menu to start scheduling!",
+            reply_markup=get_mode_keyboard(),
+            parse_mode='HTML'
+        )
+        return
+    
+    # Parse scheduled time
+    scheduled_utc = datetime.fromisoformat(last_post['scheduled_time'])
+    scheduled_ist = utc_to_ist(scheduled_utc)
+    
+    # Calculate time until post
+    now_utc = utc_now()
+    time_diff = scheduled_utc - now_utc
+    
+    if time_diff.total_seconds() > 0:
+        minutes_until = int(time_diff.total_seconds() / 60)
+        hours_until = minutes_until // 60
+        mins_remainder = minutes_until % 60
+        
+        if hours_until > 0:
+            time_until_text = f"{hours_until}h {mins_remainder}m"
+        else:
+            time_until_text = f"{minutes_until}m"
+        
+        status = f"⏳ Posts in: <b>{time_until_text}</b>"
+    else:
+        status = "🔴 <b>Overdue</b> (processing soon)"
+    
+    # Get content preview
+    if last_post['message']:
+        content_type = "📝 Text Message"
+        content = last_post['message'][:100] + "..." if len(last_post['message']) > 100 else last_post['message']
+    elif last_post['media_type']:
+        content_type = f"📎 {last_post['media_type'].title()}"
+        if last_post['caption']:
+            content = last_post['caption'][:100] + "..." if len(last_post['caption']) > 100 else last_post['caption']
+        else:
+            content = f"[{last_post['media_type']} without caption]"
+    else:
+        content_type = "❓ Unknown"
+        content = "No content"
+    
+    # Calculate suggested next start time (5 minutes after last post)
+    suggested_start_ist = scheduled_ist + timedelta(minutes=5)
+    
+    # Get total pending count
+    pending = scheduler.get_pending_posts()
+    
+    response = f"📋 <b>LAST SCHEDULED POST</b>\n\n"
+    response += f"{status}\n\n"
+    response += f"🆔 Post ID: <b>#{last_post['id']}</b>\n"
+    response += f"📅 Scheduled: <b>{scheduled_ist.strftime('%Y-%m-%d %H:%M:%S')} IST</b>\n"
+    response += f"🌍 UTC Time: <code>{scheduled_utc.strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n"
+    response += f"{content_type}\n"
+    response += f"💬 <i>{content}</i>\n\n"
+    response += f"📊 <b>Queue Status</b>\n"
+    response += f"Total Pending: <b>{len(pending)}</b> posts\n"
+    response += f"Channels: <b>{last_post['total_channels']}</b>\n\n"
+    response += f"💡 <b>Suggested Next Start Time:</b>\n"
+    response += f"🕐 <code>{suggested_start_ist.strftime('%Y-%m-%d %H:%M')}</code> IST\n"
+    response += f"   (5 minutes after last post)\n\n"
+    response += f"<b>Quick Commands:</b>\n"
+    response += f"• <code>today {suggested_start_ist.strftime('%H:%M')}</code>\n"
+    response += f"• <code>tomorrow {suggested_start_ist.strftime('%H:%M')}</code>\n\n"
+    response += f"Use /list to see all {len(pending)} pending posts"
+    
+    await update.message.reply_text(
+        response,
+        reply_markup=get_mode_keyboard(),
+        parse_mode='HTML'
+    )
 # =============================================================================
 # BACKGROUND TASKS
 # =============================================================================
@@ -2182,7 +2396,7 @@ def main():
     app.add_handler(CommandHandler("resumeall", resumeall_command))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("cancel", cancel))
-    
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     
     logger.info("="*60)
