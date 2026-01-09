@@ -1083,7 +1083,7 @@ scheduler = None
 def get_mode_keyboard():
     keyboard = [
         [KeyboardButton("📦 Bulk Posts (Auto-Space)")],
-        [KeyboardButton("🎯 Bulk Posts (Batches)")],
+        [KeyboardButton("🎯 Batch Posts (Batches)")],
         [KeyboardButton("📅 Exact Time/Date")],
         [KeyboardButton("⏱️ Duration (Wait Time)")],
         [KeyboardButton("📋 View Pending"), KeyboardButton("📊 Stats")],
