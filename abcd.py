@@ -1937,17 +1937,181 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
     
     # BATCH MODE (Similar structure with IMPROVEMENT #13 & #22)
-    elif session['mode'] == 'batch':
-        # [Batch mode implementation - similar to bulk, abbreviated for space]
-        if "❌" in message_text:
-            await cancel(update, context)
-            return
-        
-        # Implement batch mode steps here (similar to original but with improvements)
-        await update.message.reply_text(
-            "🎯 Batch mode active - implementation follows same pattern as bulk",
-            reply_markup=get_mode_keyboard()
-        )
+    # ============ MODE 2: BATCH POSTS ============
+   elif session['mode'] == 'batch':
+       
+       if "❌" in message_text or "cancel" in message_text.lower():
+           await cancel(update, context)
+           return
+       
+       if session['step'] == 'batch_get_start_time':
+           try:
+               ist_time = parse_user_time_input(message_text)
+               utc_time = ist_to_utc(ist_time)
+               session['batch_start_time_utc'] = utc_time
+               session['step'] = 'batch_get_duration'
+               
+               await update.message.reply_text(
+                   f"✅ Start: {format_time_display(utc_time)}\n\n"
+                   f"⏱️ <b>Step 2:</b> Total duration for ALL batches?\n\n"
+                   f"<b>Examples:</b>\n"
+                   f"• 0m - All batches at once\n"
+                   f"• 2h - Over 2 hours\n"
+                   f"• 6h - Over 6 hours\n"
+                   f"• 2026-01-31 23:00 - Until this time",
+                   reply_markup=get_duration_keyboard(),
+                   parse_mode='HTML'
+               )
+               
+           except ValueError as e:
+               await update.message.reply_text(
+                   f"❌ Invalid time format!\n\n{str(e)}",
+                   reply_markup=get_exact_time_keyboard()
+               )
+           return
+       
+       elif session['step'] == 'batch_get_duration':
+           try:
+               start_time_ist = utc_to_ist(session['batch_start_time_utc'])
+               duration_minutes = calculate_duration_from_end_time(start_time_ist, message_text)
+               session['duration_minutes'] = duration_minutes
+               session['step'] = 'batch_get_batch_size'
+               
+               duration_text = "immediately (all at once)" if duration_minutes == 0 else f"{duration_minutes} minutes"
+               
+               await update.message.reply_text(
+                   f"✅ Duration: {duration_text}\n\n"
+                   f"📦 <b>Step 3:</b> Posts per batch?\n\n"
+                   f"<b>Examples:</b>\n"
+                   f"• 10 - 10 posts per batch\n"
+                   f"• 20 - 20 posts per batch\n"
+                   f"• 50 - 50 posts per batch",
+                   reply_markup=get_batch_size_keyboard(),
+                   parse_mode='HTML'
+               )
+               
+           except ValueError as e:
+               await update.message.reply_text(
+                   f"❌ Invalid duration!\n\n{str(e)}",
+                   reply_markup=get_duration_keyboard()
+               )
+           return
+       
+       elif session['step'] == 'batch_get_batch_size':
+           try:
+               batch_size = int(message_text.strip())
+               if batch_size < 1:
+                   raise ValueError("Must be at least 1")
+               
+               session['batch_size'] = batch_size
+               session['step'] = 'batch_collect_posts'
+               
+               await update.message.reply_text(
+                   f"✅ Batch size: <b>{batch_size} posts</b>\n\n"
+                   f"📤 <b>Step 4:</b> Send/forward all posts\n\n"
+                   f"When done, click button:",
+                   reply_markup=get_bulk_collection_keyboard(),
+                   parse_mode='HTML'
+               )
+               
+           except ValueError:
+               await update.message.reply_text(
+                   "❌ Invalid! Enter a number (e.g., 10, 20, 30)",
+                   reply_markup=get_batch_size_keyboard()
+               )
+           return
+       
+       elif session['step'] == 'batch_collect_posts':
+           
+           if "✅ Done" in message_text:
+               posts = session.get('posts', [])
+               
+               if not posts:
+                   await update.message.reply_text(
+                       "❌ No posts! Send at least one.",
+                       reply_markup=get_bulk_collection_keyboard()
+                   )
+                   return
+               
+               session['step'] = 'batch_confirm'
+               
+               duration_minutes = session['duration_minutes']
+               batch_size = session['batch_size']
+               num_posts = len(posts)
+               num_batches = (num_posts + batch_size - 1) // batch_size
+               start_utc = session['batch_start_time_utc']
+               start_ist = utc_to_ist(start_utc)
+               
+               # IMPROVEMENT #14: Auto-backup before confirmation
+               if scheduler.backup_system:
+                   await scheduler.backup_system.send_backup_file(scheduler, force_new=True)
+               
+               response = f"📋 <b>CONFIRMATION REQUIRED</b>\n\n"
+               response += f"📦 Total Posts: <b>{num_posts}</b>\n"
+               response += f"🎯 Batch Size: <b>{batch_size} posts</b>\n"
+               response += f"📊 Batches: <b>{num_batches}</b>\n"
+               response += f"📢 Channels: <b>{len(scheduler.channel_ids)}</b>\n"
+               response += f"📅 Start: {format_time_display(start_utc)}\n"
+               
+               if duration_minutes == 0:
+                   response += f"⚡ <b>All batches at SAME TIME</b>\n"
+               else:
+                   batch_interval = duration_minutes / num_batches if num_batches > 1 else 0
+                   end_ist = start_ist + timedelta(minutes=duration_minutes)
+                   response += f"📅 End: {format_time_display(ist_to_utc(end_ist))}\n"
+                   response += f"⏱️ Batch Interval: <b>{batch_interval:.1f} min</b>\n"
+               
+               response += f"\n<b>Schedule Preview:</b>\n"
+               
+               # Show first 5 batches
+               batch_interval = duration_minutes / num_batches if num_batches > 1 and duration_minutes > 0 else 0
+               for i in range(min(5, num_batches)):
+                   batch_utc = start_utc + timedelta(minutes=batch_interval * i)
+                   batch_ist = utc_to_ist(batch_utc)
+                   batch_start = i * batch_size + 1
+                   batch_end = min((i + 1) * batch_size, num_posts)
+                   response += f"• Batch #{i+1}: {batch_ist.strftime('%H:%M')} IST - Posts #{batch_start}-{batch_end}\n"
+               
+               if num_batches > 5:
+                   response += f"\n<i>...and {num_batches - 5} more batches</i>\n"
+               
+               response += f"\n⚠️ Confirm & Schedule?"
+               
+               await update.message.reply_text(
+                   response,
+                   reply_markup=get_confirmation_keyboard(),
+                   parse_mode='HTML'
+               )
+               return
+           
+           content = extract_content(update.message)
+           
+           if content:
+               session['posts'].append(content)
+               count = len(session['posts'])
+               await update.message.reply_text(
+                   f"✅ Post #{count} added!\n\n"
+                   f"📊 Total: <b>{count}</b>\n\n"
+                   f"Send more or click <b>Done</b>",
+                   reply_markup=get_bulk_collection_keyboard(),
+                   parse_mode='HTML'
+               )
+           return
+       
+       elif session['step'] == 'batch_confirm':
+           if "✅ Confirm" in message_text:
+               await schedule_batch_posts(update, context)
+               return
+           elif "❌" in message_text:
+               await cancel(update, context)
+               return
+           else:
+               await update.message.reply_text(
+                   "⚠️ Click <b>✅ Confirm & Schedule</b> or <b>❌ Cancel</b>",
+                   reply_markup=get_confirmation_keyboard(),
+                   parse_mode='HTML'
+               )
+               return
     
     # EXACT TIME MODE
     elif session['mode'] == 'exact':
