@@ -2384,6 +2384,98 @@ async def schedule_bulk_posts(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     scheduler.user_sessions[user_id] = {'mode': None, 'step': 'choose_mode'}
 
+async def schedule_batch_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Schedule batch posts with proper timing"""
+    user_id = update.effective_user.id
+    session = scheduler.user_sessions[user_id]
+    
+    posts = session.get('posts', [])
+    duration_minutes = session['duration_minutes']
+    batch_size = session['batch_size']
+    start_utc = session['batch_start_time_utc']
+    num_posts = len(posts)
+    num_batches = (num_posts + batch_size - 1) // batch_size
+    
+    batch_id = f"batch_{start_utc.isoformat()}"
+    
+    # IMPROVEMENT #22: Final posts in batch all at once
+    if duration_minutes == 0:
+        # All batches at same time with 2 sec delay between batches
+        for i, post in enumerate(posts):
+            batch_number = i // batch_size
+            scheduled_utc = start_utc + timedelta(seconds=batch_number * 2)
+            
+            scheduler.schedule_post(
+                scheduled_time_utc=scheduled_utc,
+                message=post.get('message'),
+                media_type=post.get('media_type'),
+                media_file_id=post.get('media_file_id'),
+                caption=post.get('caption'),
+                batch_id=batch_id
+            )
+    else:
+        # Normal batch spacing
+        batch_interval = duration_minutes / num_batches if num_batches > 1 else 0
+        
+        for i, post in enumerate(posts):
+            batch_number = i // batch_size
+            post_in_batch = i % batch_size
+            
+            # IMPROVEMENT #22: Posts within same batch go at same time (2 sec apart)
+            scheduled_utc = start_utc + timedelta(
+                minutes=batch_interval * batch_number,
+                seconds=post_in_batch * 2
+            )
+            
+            scheduler.schedule_post(
+                scheduled_time_utc=scheduled_utc,
+                message=post.get('message'),
+                media_type=post.get('media_type'),
+                media_file_id=post.get('media_file_id'),
+                caption=post.get('caption'),
+                batch_id=batch_id
+            )
+    
+    start_ist = utc_to_ist(start_utc)
+    
+    response = f"✅ <b>BATCH SCHEDULED!</b>\n\n"
+    response += f"📦 Total Posts: {num_posts}\n"
+    response += f"🎯 Batch Size: {batch_size} posts\n"
+    response += f"📊 Batches: {num_batches}\n"
+    response += f"📢 Channels: {len(scheduler.channel_ids)}\n"
+    response += f"📅 Start: {format_time_display(start_utc)}\n"
+    
+    if duration_minutes == 0:
+        response += f"⚡ All batches at same time!\n"
+    else:
+        batch_interval = duration_minutes / num_batches if num_batches > 1 else 0
+        response += f"⏱️ Batch Interval: {batch_interval:.1f} min\n"
+    
+    response += f"\n<b>Batch Schedule:</b>\n"
+    
+    # Show first 5 batches
+    batch_interval = duration_minutes / num_batches if num_batches > 1 and duration_minutes > 0 else 0
+    for i in range(min(5, num_batches)):
+        batch_utc = start_utc + timedelta(minutes=batch_interval * i)
+        batch_ist = utc_to_ist(batch_utc)
+        batch_start = i * batch_size + 1
+        batch_end = min((i + 1) * batch_size, num_posts)
+        response += f"• Batch #{i+1}: {batch_ist.strftime('%H:%M')} - Posts #{batch_start}-{batch_end}\n"
+    
+    if num_batches > 5:
+        response += f"\n<i>...and {num_batches - 5} more</i>\n"
+    
+    await update.message.reply_text(
+        response,
+        reply_markup=get_mode_keyboard(),
+        parse_mode='HTML'
+    )
+    
+    # Update backup
+    if scheduler.backup_system:
+        await scheduler.backup_system.send_backup_file(scheduler, force_new=True)
+    
+    scheduler.user_sessions[user_id] = {'mode': None, 'step': 'choose_mode'}
 
 async def lastpost_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show detailed information about the last scheduled post"""
