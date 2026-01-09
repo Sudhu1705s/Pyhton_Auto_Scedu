@@ -1765,7 +1765,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        elif "🎯 Bulk" in message_text and "Batches" in message_text:
+        elif "🎯 Batch" in message_text and "Batches" in message_text:
             if len(scheduler.channel_ids) == 0:
                 await update.message.reply_text(
                     "❌ No channels! Add channels first",
